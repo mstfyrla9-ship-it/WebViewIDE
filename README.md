@@ -17,7 +17,10 @@ The page is a normal web page. Both the preview and the installed app are drawn 
 
 ## Download
 
-Download the latest IDE APK from [GitHub Releases](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/latest).
+Download WebViewIDE 0.2.1 directly:
+
+- [WebViewIDE-v0.2.1.apk](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/latest/download/WebViewIDE-v0.2.1.apk)
+- [Release notes](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/tag/v0.2.1)
 
 ## Build
 

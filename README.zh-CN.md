@@ -14,6 +14,13 @@
 
 页面就是普通网页。预览和安装包都由系统 WebView 绘制。
 
+## 下载
+
+直接下载 WebViewIDE 0.2.1：
+
+- [WebViewIDE-v0.2.1.apk](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/latest/download/WebViewIDE-v0.2.1.apk)
+- [版本说明](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/tag/v0.2.1)
+
 ## 构建
 
 需要 JDK 17 和 Android SDK。
