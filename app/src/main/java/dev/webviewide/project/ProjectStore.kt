@@ -45,6 +45,9 @@ data class WebProject(
         spaFallback = detection.spaFallback,
         runnable = detection.runnable,
         summary = detection.summary,
+        packageName = detection.analysis?.packageName?.takeIf { it.isNotBlank() } ?: packageName,
+        versionName = detection.analysis?.versionName ?: versionName,
+        versionCode = detection.analysis?.versionCode ?: versionCode,
         detected = true,
     )
 }
@@ -168,6 +171,70 @@ object ProjectStore {
         save(next)
         remember(context, id)
         return next
+    }
+
+    fun cloneIndependent(context: Context, project: WebProject, name: String): WebProject {
+        val backup = ProjectBackup.create(project, "before-independent-clone")
+        val copy = duplicate(context, project)
+        val cloned = copy.copy(
+            name = name.ifBlank { copy.name },
+        )
+        File(cloned.dir, ".git").deleteRecursively()
+        save(cloned)
+        remember(context, cloned.id)
+        backup ?: return cloned
+        return cloned
+    }
+
+    fun changeIdentity(
+        project: WebProject,
+        name: String? = null,
+        packageName: String? = null,
+        versionName: String? = null,
+        versionCode: Int? = null,
+    ): WebProject {
+        val backup = ProjectBackup.create(project, "before-identity-change")
+            ?: throw IllegalStateException("Could not create project backup")
+        val oldPackage = project.resolvedPackageName()
+        val newPackage = packageName?.trim()?.takeIf { it.isNotBlank() }
+        val textFiles = project.dir.walkTopDown()
+            .onEnter { it == project.dir || !ArchiveImport.shouldSkipDir(it.name) }
+            .filter { it.isFile }
+            .filter { it.name == "AndroidManifest.xml" || it.name.endsWith(".gradle") || it.name.endsWith(".gradle.kts") }
+            .toList()
+        textFiles.forEach { file ->
+            var text = file.readText()
+            if (newPackage != null) {
+                text = text
+                    .replace(Regex("""package\s*=\s*"${Regex.escape(oldPackage)}""""), """package="$newPackage"""")
+                    .replace(Regex("""applicationId\s*[=:]\s*"${Regex.escape(oldPackage)}""""), """applicationId="$newPackage"""")
+                    .replace(Regex("""namespace\s*[=:]\s*"${Regex.escape(oldPackage)}""""), """namespace="$newPackage"""")
+            }
+            if (versionName != null) {
+                text = text
+                    .replace(Regex("""versionName\s*[=:]\s*"[^"]*""""), """versionName="$versionName"""" )
+                    .replace(Regex("""android:versionName\s*=\s*"[^"]*""""), """android:versionName="$versionName"""" )
+            }
+            if (versionCode != null) {
+                text = text
+                    .replace(Regex("""versionCode\s*[=:]\s*\d+"""), "versionCode=$versionCode")
+                    .replace(Regex("""android:versionCode\s*=\s*"[^"]*""""), """android:versionCode="$versionCode"""" )
+            }
+            val tmp = File(file.parentFile, ".${file.name}.identity.tmp")
+            tmp.writeText(text)
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
+        }
+        val changed = project.copy(
+            name = name?.trim()?.takeIf { it.isNotBlank() } ?: project.name,
+            packageName = newPackage ?: project.packageName,
+            versionName = versionName?.trim()?.takeIf { it.isNotBlank() } ?: project.versionName,
+            versionCode = versionCode ?: project.versionCode,
+        )
+        save(changed)
+        return changed
     }
 
     fun delete(context: Context, project: WebProject): WebProject? {

@@ -11,6 +11,17 @@ import java.util.zip.ZipOutputStream
  * unit-testable without an Android runtime.
  */
 object ProjectZip {
+    fun write(root: File, destination: File) {
+        val files = root.walkTopDown()
+            .onEnter { it == root || !ArchiveImport.shouldSkipDir(it.name) }
+            .filter { it.isFile }
+            .filter { it.name != ".DS_Store" }
+            .filter { it.parentFile?.name != "backups" }
+            .toList()
+        destination.parentFile?.mkdirs()
+        destination.outputStream().use { ProjectZip.write(root, files, it) }
+    }
+
     /** Entry names must be relative, normalised and free of traversal. */
     fun entryName(root: File, file: File): String {
         val rel = file.toRelativeString(root).replace(File.separatorChar, '/')

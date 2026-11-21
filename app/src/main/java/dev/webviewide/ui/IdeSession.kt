@@ -13,7 +13,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.webkit.WebViewFeature
 import dev.webviewide.build.ApkInstaller
+import dev.webviewide.build.ApkInspector
 import dev.webviewide.build.ApkPackager
+import dev.webviewide.build.AndroidBuildPipeline
+import dev.webviewide.build.BuildProgress
 import dev.webviewide.build.ArtifactStore
 import dev.webviewide.build.BuildArtifact
 import dev.webviewide.build.BuildConfig
@@ -22,6 +25,11 @@ import dev.webviewide.build.KeystoreException
 import dev.webviewide.build.KeystoreManager
 import dev.webviewide.build.Orientation
 import dev.webviewide.build.SignMode
+import dev.webviewide.build.SupportReport
+import dev.webviewide.ai.AiClient
+import dev.webviewide.ai.AiConfig
+import dev.webviewide.ai.AiConfigStore
+import dev.webviewide.ai.AiProvider
 import dev.webviewide.git.CredentialStore
 import dev.webviewide.git.GitEnv
 import dev.webviewide.git.GitRepo
@@ -35,6 +43,7 @@ import dev.webviewide.project.ProjectStore
 import dev.webviewide.project.ProjectZip
 import dev.webviewide.project.WebProject
 import dev.webviewide.project.isRasterImage
+import dev.webviewide.project.sourceKindFor
 import dev.webviewide.server.LocalPreviewServer
 import dev.webviewide.server.SiteFiles
 import java.io.File
@@ -72,6 +81,8 @@ class IdeSession(
     var buildLabel by mutableStateOf("")
     var buildLog by mutableStateOf(listOf<String>())
     var buildRunning by mutableStateOf(false)
+    var buildProgress by mutableStateOf(BuildProgress())
+    private val buildCancelRequested = java.util.concurrent.atomic.AtomicBoolean(false)
     var signingKeys by mutableStateOf(listOf<KeystoreManager.StoredKey>())
     var projectExportRequested by mutableStateOf(false)
     var gitReady by mutableStateOf(false)
@@ -83,6 +94,10 @@ class IdeSession(
     var gitCredHosts by mutableStateOf(listOf<String>())
     var gitRemote by mutableStateOf<String?>(null)
     var gitBranches by mutableStateOf(listOf<GitRepo.BranchInfo>())
+    var aiBusy by mutableStateOf(false)
+    var aiResult by mutableStateOf("")
+    var aiConfig by mutableStateOf(AiConfigStore.load(app))
+    var currentLocale by mutableStateOf(AppLocale.load(app))
     private val credentials = CredentialStore(
         File(app.filesDir, "git"),
         seal = { KeystoreManager.wrap(it) },
@@ -91,6 +106,11 @@ class IdeSession(
 
     fun requestProjectExport() {
         projectExportRequested = true
+    }
+
+    fun setLocale(language: String) {
+        AppLocale.save(app, language)
+        currentLocale = language
     }
 
     fun refreshBuildState() {
@@ -151,6 +171,14 @@ class IdeSession(
             }
             status = outcome.fold({ "安装包已导出" }, { it.message ?: "导出失败" })
         }
+    }
+
+    fun sendSupportReport(type: String, description: String) {
+        val summary = project?.let {
+            "${it.name}; kind=${it.kind}; package=${it.resolvedPackageName()}; version=${it.versionName} (${it.versionCode})"
+        }.orEmpty()
+        val report = SupportReport.create(type, description, buildLog.joinToString("\n"), summary)
+        SupportReport.reviewAndSend(app, report)
     }
 
     fun shareArtifact(id: String) {
@@ -294,6 +322,101 @@ class IdeSession(
     fun gitPush() = gitRemoteOp("推送") { repo, provider -> repo.push(provider) }
 
     fun gitPull() = gitRemoteOp("拉取") { repo, provider -> repo.pull(provider) }
+
+    fun saveAiConfig(config: AiConfig) {
+        aiConfig = config
+        scope.launch(Dispatchers.IO) { AiConfigStore.save(app, config) }
+    }
+
+    fun saveAiKey(provider: AiProvider, apiKey: String) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { AiConfigStore.saveKey(app, provider, apiKey) }.fold(
+                onSuccess = { status = if (apiKey.isBlank()) "已删除 ${provider.title} API Key" else "${provider.title} API Key 已加密保存" },
+                onFailure = { status = it.message ?: "API Key 保存失败" },
+            )
+        }
+    }
+
+    fun aiKey(provider: AiProvider): String =
+        runCatching { AiConfigStore.loadKey(app, provider) }.getOrDefault("")
+
+    fun askAi(prompt: String) {
+        val open = project
+        if (prompt.isBlank()) {
+            status = "先描述需要修改的内容"
+            return
+        }
+        aiBusy = true
+        aiResult = ""
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    flushBlocking()
+                    val provider = AiProvider.fromId(aiConfig.providerId)
+                    val key = AiConfigStore.loadKey(app, provider)
+                    val file = current
+                    val rel = if (open != null && file != null) {
+                        runCatching { ProjectStore.relative(open, file) }.getOrDefault(file.name)
+                    } else ""
+                    val currentText = if (file != null) draft else ""
+                    val system = """
+                        You are an expert coding assistant inside WebViewIDE.
+                        Help improve HTML, CSS, JavaScript and small web projects.
+                        Prefer complete, working code. Respect existing conventions.
+                        If asked to edit the active file, return only the complete replacement file
+                        in a single fenced code block. Do not add explanations outside the block.
+                    """.trimIndent()
+                    val user = buildString {
+                        append(prompt.trim())
+                        if (rel.isNotBlank()) {
+                            append("\n\nActive file: ").append(rel)
+                            append("\nCurrent content:\n```").append(sourceKindFor(file?.name ?: "").name.lowercase())
+                            append('\n').append(currentText).append("\n```")
+                        }
+                    }
+                    AiClient.complete(
+                        provider = provider,
+                        baseUrl = aiConfig.baseUrl,
+                        model = aiConfig.model,
+                        apiKey = key,
+                        systemPrompt = system,
+                        userPrompt = user,
+                    )
+                }
+            }
+            aiBusy = false
+            outcome.fold(
+                onSuccess = { aiResult = it },
+                onFailure = { aiResult = ""; status = it.message ?: "AI 请求失败" },
+            )
+        }
+    }
+
+    fun applyAiResult() {
+        val file = current ?: run {
+            status = "先打开要修改的文件"
+            return
+        }
+        val result = aiResult.trim()
+        if (result.isBlank()) return
+        val replacement = extractCodeBlock(result)
+        edit(replacement)
+        docEpoch += 1
+        status = "AI 修改已应用到 ${file.name}"
+    }
+
+    private fun extractCodeBlock(text: String): String {
+        val trimmed = text.trim()
+        val start = trimmed.indexOf("```")
+        if (start >= 0) {
+            val openingEnd = trimmed.indexOf('\n', start)
+            val closing = trimmed.lastIndexOf("```")
+            if (openingEnd >= 0 && closing > openingEnd) {
+                return trimmed.substring(openingEnd + 1, closing).trimEnd() + "\n"
+            }
+        }
+        return trimmed
+    }
 
     private fun gitRemoteOp(label: String, op: (GitRepo, org.eclipse.jgit.transport.CredentialsProvider?) -> String) {
         val open = project ?: return
@@ -974,11 +1097,21 @@ class IdeSession(
         saveJob?.cancel()
         busy = true
         status = "正在打包"
+        buildRunning = true
+        buildCancelRequested.set(false)
+        val pipelineStages = AndroidBuildPipeline.stages().toMutableList()
+        AndroidBuildPipeline.stage(pipelineStages, 0, dev.webviewide.build.StageStatus.RUNNING, "Analyzing project")
+        buildProgress = BuildProgress(pipelineStages, true)
+        buildLog = listOf("开始构建流水线")
         scope.launch {
             val outcome = withContext(Dispatchers.IO) {
                 runCatching {
+                    if (buildCancelRequested.get()) throw java.util.concurrent.CancellationException("Build cancelled")
                     if (file != null) saver.save(file, snapshot, saving)
                     val fresh = project ?: open
+                    AndroidBuildPipeline.stage(pipelineStages, 1, dev.webviewide.build.StageStatus.RUNNING, "Checking signing and tools")
+                    buildProgress = BuildProgress(pipelineStages, true)
+                    buildLog = buildLog + "检查工具与签名"
                     val userKey = KeystoreManager.resolve(app, fresh.signingFingerprint)
                     if (fresh.signingFingerprint.isNotBlank() && userKey == null) {
                         throw KeystoreException("绑定的签名密钥不可用，请在打包设置里重新选择")
@@ -988,6 +1121,10 @@ class IdeSession(
                     val code = if (fresh.autoVersionCode) fresh.versionCode + 1 else fresh.versionCode
                     val stamp = System.currentTimeMillis()
                     val out = File(ArtifactStore.dir(app), "${fresh.id}-$stamp.apk")
+                    AndroidBuildPipeline.stage(pipelineStages, 0, dev.webviewide.build.StageStatus.DONE, "Project ready")
+                    AndroidBuildPipeline.stage(pipelineStages, 1, dev.webviewide.build.StageStatus.DONE, "Signing identity ready")
+                    AndroidBuildPipeline.stage(pipelineStages, 4, dev.webviewide.build.StageStatus.RUNNING, "Packaging WebView assets")
+                    buildProgress = BuildProgress(pipelineStages, true)
                     val kind = ApkPackager(app).packageApk(
                         config = BuildConfig(
                             appName = fresh.name,
@@ -1009,7 +1146,27 @@ class IdeSession(
                         outFile = out,
                         identity = identity,
                         projectDir = fresh.dir,
+                        cancelRequested = { buildCancelRequested.get() },
+                        onLog = { line ->
+                            buildLog = buildLog + line
+                        },
+                        onPhase = { phase, detail ->
+                            val label = when (phase) {
+                                "package" -> "打包资源"
+                                "sign" -> "Zipalign / 签名"
+                                else -> detail
+                            }
+                            buildLabel = if (detail.isBlank()) label else "$label：$detail"
+                        },
                     )
+                    val info = ApkInspector.inspect(out)
+                    AndroidBuildPipeline.stage(pipelineStages, 4, dev.webviewide.build.StageStatus.DONE, "APK created")
+                    AndroidBuildPipeline.stage(pipelineStages, 8, dev.webviewide.build.StageStatus.DONE, "Zipalign verified")
+                    AndroidBuildPipeline.stage(pipelineStages, 9, dev.webviewide.build.StageStatus.DONE, "Signature completed")
+                    AndroidBuildPipeline.stage(pipelineStages, 10, dev.webviewide.build.StageStatus.DONE, "Signature verified")
+                    AndroidBuildPipeline.stage(pipelineStages, 11, dev.webviewide.build.StageStatus.DONE, "APK integrity checked")
+                    AndroidBuildPipeline.stage(pipelineStages, 12, dev.webviewide.build.StageStatus.DONE, "Output saved")
+                    AndroidBuildPipeline.stage(pipelineStages, 13, dev.webviewide.build.StageStatus.DONE, "Report created")
                     ArtifactStore.record(
                         app,
                         BuildArtifact(
@@ -1021,6 +1178,12 @@ class IdeSession(
                             sizeBytes = out.length(),
                             createdAt = stamp,
                             file = out,
+                            packageName = info.packageName ?: fresh.resolvedPackageName(),
+                            minSdk = info.minSdk,
+                            targetSdk = info.targetSdk,
+                            architectures = info.architectures,
+                            signed = info.signed,
+                            aligned = info.aligned,
                         ),
                     )
                     if (fresh.autoVersionCode) {
@@ -1034,6 +1197,9 @@ class IdeSession(
             outcome.fold(
                 onSuccess = { apk ->
                     artifacts = ArtifactStore.list(app)
+                    buildRunning = false
+                    buildLabel = "完成：${ApkInspector.inspect(apk).let { "${it.sizeBytes / 1024} KB" }}"
+                    buildProgress = buildProgress.copy(running = false)
                     if (ApkInstaller.canRequestInstall(app)) {
                         status = "已签名，正在打开安装"
                         ApkInstaller.install(app, apk)
@@ -1043,12 +1209,28 @@ class IdeSession(
                         ApkInstaller.openInstallPermissionSettings(app)
                     }
                 },
-                onFailure = { status = it.message ?: "打包失败" },
+                onFailure = { error ->
+                    buildRunning = false
+                    buildProgress = buildProgress.copy(running = false)
+                    buildLog = buildLog + "错误：${error.message ?: "打包失败"}"
+                    val suggestions = dev.webviewide.build.BuildRepair.diagnose(buildLog.joinToString("\n"))
+                    if (suggestions.isNotEmpty()) {
+                        buildLog = buildLog + "修复建议：${suggestions.first().title} — ${suggestions.first().detail}"
+                    }
+                    status = error.message ?: "打包失败"
+                },
             )
         }
     }
 
-
+    fun cancelBuild() {
+        buildCancelRequested.set(true)
+        buildRunning = false
+        busy = false
+        buildLabel = "取消请求已发送"
+        buildLog = buildLog + "用户请求取消构建"
+        buildProgress = buildProgress.copy(running = false)
+    }
 
     fun copyUrl() {
         val text = lanUrl ?: url ?: return

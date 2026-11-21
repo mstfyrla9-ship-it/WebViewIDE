@@ -37,6 +37,12 @@ object ArtifactStore {
                     sizeBytes = file.length(),
                     createdAt = (m["createdAt"] as? Number)?.toLong() ?: file.lastModified(),
                     file = file,
+                    packageName = m.string("packageName"),
+                    minSdk = (m["minSdk"] as? Number)?.toInt(),
+                    targetSdk = (m["targetSdk"] as? Number)?.toInt(),
+                    architectures = (m["architectures"] as? List<*>)?.mapNotNull { it as? String }?.toSet().orEmpty(),
+                    signed = m["signed"] as? Boolean ?: false,
+                    aligned = m["aligned"] as? Boolean ?: false,
                 )
             }.getOrNull()
         }.sortedByDescending { it.createdAt }
@@ -69,6 +75,12 @@ object ArtifactStore {
                 "kind" to it.kind.name,
                 "createdAt" to it.createdAt,
                 "file" to it.file.name,
+                "packageName" to it.packageName,
+                "minSdk" to (it.minSdk ?: -1),
+                "targetSdk" to (it.targetSdk ?: -1),
+                "architectures" to it.architectures.toList(),
+                "signed" to it.signed,
+                "aligned" to it.aligned,
             )
         }
         File(dir(context), INDEX).writeText(encodeJson(list))

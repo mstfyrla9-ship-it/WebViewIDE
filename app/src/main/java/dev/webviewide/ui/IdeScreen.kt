@@ -1,5 +1,6 @@
 package dev.webviewide.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
@@ -107,7 +109,7 @@ import dev.webviewide.ui.theme.AppMotion
 import java.io.File
 import kotlinx.coroutines.launch
 
-private enum class Panel { PROJECTS, SETTINGS, PACKAGE, ABOUT, HISTORY, BUILD, GIT }
+private enum class Panel { PROJECTS, SETTINGS, PACKAGE, ABOUT, HISTORY, BUILD, GIT, AI }
 
 @Composable
 fun rememberIdeSession(): IdeSession {
@@ -321,6 +323,14 @@ fun IdeScreen() {
                                         panel = Panel.GIT
                                     },
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("الذكاء الاصطناعي البرمجي") },
+                                    leadingIcon = { Icon(Icons.Outlined.SmartToy, contentDescription = null) },
+                                    onClick = {
+                                        menu = false
+                                        panel = Panel.AI
+                                    },
+                                )
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                                 DropdownMenuItem(
@@ -375,6 +385,7 @@ fun IdeScreen() {
                             onPickTemplate = { id -> session.create(id, Templates.byId(id)?.name ?: "未命名") },
                             onCreateBlank = { session.create("blank", "我的网页") },
                             onClone = { panel = Panel.PROJECTS },
+                            onImportZip = { importFile.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                         )
                     }
                     return@Crossfade
@@ -490,13 +501,21 @@ fun IdeScreen() {
                 project = open,
                 url = session.url,
                 lanUrl = session.lanUrl,
+                locale = session.currentLocale,
+                onLocale = { language ->
+                    session.setLocale(language)
+                    (context as? Activity)?.recreate()
+                },
                 onProject = { next, restart -> session.update(next, restart) },
                 onCopy = { session.copyUrl() },
                 onClear = { session.clearSiteData() },
                 onDismiss = { panel = null },
             )
         }
-        Panel.ABOUT -> AboutSheet(onDismiss = { panel = null })
+        Panel.ABOUT -> AboutSheet(
+            onSupport = { session.sendSupportReport("Support request", session.status.orEmpty()) },
+            onDismiss = { panel = null },
+        )
         Panel.BUILD -> BuildPanel(
             handle = buildHandle,
             running = session.buildRunning,
@@ -507,6 +526,7 @@ fun IdeScreen() {
             onRunning = { session.buildRunning = true },
             onStartBuild = { buildCtl.startBuild(2) },
             onStartTypecheck = { buildCtl.startTypecheck(3) },
+            onCancel = { session.cancelBuild() },
             onDismiss = { panel = null },
         )
         Panel.HISTORY -> HistorySheet(
@@ -542,6 +562,17 @@ fun IdeScreen() {
             onBranchCreate = session::gitCreateBranch,
             onBranchCheckout = session::gitCheckout,
             onBranchMerge = session::gitMerge,
+            onDismiss = { panel = null },
+        )
+        Panel.AI -> AiSheet(
+            config = session.aiConfig,
+            busy = session.aiBusy,
+            result = session.aiResult,
+            loadKey = session::aiKey,
+            onConfig = session::saveAiConfig,
+            onSaveKey = session::saveAiKey,
+            onAsk = session::askAi,
+            onApply = session::applyAiResult,
             onDismiss = { panel = null },
         )
         Panel.PACKAGE -> project?.let { open ->

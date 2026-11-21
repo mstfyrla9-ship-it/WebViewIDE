@@ -21,6 +21,7 @@ class ApkPackager(private val context: Context) {
         outFile: File,
         identity: SigningIdentity,
         projectDir: File,
+        cancelRequested: () -> Boolean = { false },
         onLog: (String) -> Unit = {},
         onPhase: (String, String) -> Unit = { _, _ -> },
     ): ArtifactKind {
@@ -29,6 +30,7 @@ class ApkPackager(private val context: Context) {
             mkdirs()
         }
         try {
+            if (cancelRequested()) throw java.util.concurrent.CancellationException("Build cancelled")
             val template = File(work, "template.apk")
             extractTemplate(template)
             onLog("template ready (${humanSize(template.length())})")
@@ -46,6 +48,7 @@ class ApkPackager(private val context: Context) {
                 stripMeta(module)
                 module.refreshTable()
                 module.refreshManifest()
+                if (cancelRequested()) throw java.util.concurrent.CancellationException("Build cancelled")
 
                 val unsigned = File(work, "unsigned.apk")
                 onPhase("package", "write")
@@ -58,20 +61,20 @@ class ApkPackager(private val context: Context) {
 
                 val aligned = File(work, "aligned.apk")
                 onPhase("sign", "align")
-                runCatching { ZipAlign.align(unsigned, aligned) }
-                    .onFailure { onLog("align skipped: ${it.message}") }
-                val toSign = if (aligned.isFile && aligned.length() > 1024L && ZipAlign.verify(aligned)) {
-                    onLog("4-byte aligned")
-                    aligned
-                } else {
-                    unsigned
+                ZipAlign.align(unsigned, aligned)
+                check(aligned.isFile && aligned.length() > 1024L && ZipAlign.verify(aligned)) {
+                    "APK alignment verification failed"
                 }
+                onLog("4-byte aligned")
                 val signedTmp = File(work, "signed.apk")
                 onPhase("sign", "signing")
-                sign(toSign, signedTmp, identity)
+                sign(aligned, signedTmp, identity)
                 if (!signedTmp.isFile || signedTmp.length() < 1024L) {
                     throw IllegalStateException("signing produced empty apk")
                 }
+                onPhase("sign", "verify")
+                ApkSignatureVerifier.verifyOrThrow(signedTmp)
+                onLog("APK signature verified")
                 val kind = if (config.signMode == SignMode.RELEASE) {
                     ArtifactKind.APK_RELEASE
                 } else {

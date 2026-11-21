@@ -12,6 +12,11 @@ object ProjectKinds {
     const val SOLID = "solid"
     const val DOCS = "docs"
     const val SOURCE = "source"
+    const val ANDROID_GRADLE = "android-gradle"
+    const val ANDROID_JAVA = "android-java"
+    const val ANDROID_KOTLIN = "android-kotlin"
+    const val APK = "apk"
+    const val AAB = "aab"
 
     fun label(kind: String): String = when (kind) {
         VUE -> "Vue"
@@ -24,6 +29,11 @@ object ProjectKinds {
         SOLID -> "Solid"
         DOCS -> "文档站"
         SOURCE -> "源码"
+        ANDROID_GRADLE -> "Android Gradle"
+        ANDROID_JAVA -> "Android Java"
+        ANDROID_KOTLIN -> "Android Kotlin"
+        APK -> "APK"
+        AAB -> "AAB"
         else -> "静态网页"
     }
 }
@@ -66,6 +76,7 @@ data class Detection(
     val spaFallback: Boolean,
     val runnable: Boolean,
     val summary: String,
+    val analysis: AndroidProjectAnalysis? = null,
 )
 
 data class TreeRow(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ internal fun WelcomeScreen(
     onPickTemplate: (String) -> Unit,
     onCreateBlank: () -> Unit,
     onClone: () -> Unit = {},
+    onImportZip: () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -122,6 +124,12 @@ internal fun WelcomeScreen(
         Spacer(Modifier.height(10.dp))
         OutlinedButton(onClick = onClone, modifier = Modifier.fillMaxWidth()) {
             Text("从 Git 克隆已有仓库")
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onImportZip, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Outlined.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("上传 ZIP 压缩项目")
         }
         Spacer(Modifier.height(18.dp))
         Text(

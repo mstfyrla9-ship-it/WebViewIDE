@@ -1,6 +1,7 @@
 package dev.webviewide
 
 import android.os.Bundle
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -9,6 +10,9 @@ import dev.webviewide.ui.IdeScreen
 import dev.webviewide.ui.theme.WebViewIDETheme
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(dev.webviewide.ui.AppLocale.apply(newBase))
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must run before super.onCreate so the platform hands the splash
         // window over to us instead of flashing a bare theme.
