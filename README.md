@@ -11,8 +11,13 @@ An Android IDE for HTML, CSS, and JavaScript. Edit files on the phone, preview t
 - Split the screen between the editor and the preview, and drag the hinge to change the ratio.
 - **运行** saves and reloads the preview.
 - **打包** injects `src/` into a WebView shell as `assets/www/`, writes `assets/webcfg.json`, signs the APK, and opens the installer.
+- **AI** connects to OpenAI-compatible providers, Anthropic, or Gemini and can apply generated code to the active file.
 
 The page is a normal web page. Both the preview and the installed app are drawn by the system WebView.
+
+## Download
+
+Download the latest IDE APK from [GitHub Releases](https://github.com/mstfyrla9-ship-it/WebViewIDE/releases/latest).
 
 ## Build
 

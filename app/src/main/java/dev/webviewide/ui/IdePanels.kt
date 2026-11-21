@@ -61,6 +61,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.OutlinedButton
@@ -89,7 +90,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.webviewide.build.ArtifactKind
 import dev.webviewide.build.BuildArtifact
@@ -99,6 +102,8 @@ import dev.webviewide.project.Template
 import dev.webviewide.project.Templates
 import dev.webviewide.project.WebProject
 import dev.webviewide.project.WebViewConfig
+import dev.webviewide.ai.AiConfig
+import dev.webviewide.ai.AiProvider
 import dev.webviewide.ui.theme.AppMotion
 import java.io.File
 import kotlin.math.roundToInt
@@ -381,6 +386,130 @@ internal fun NameDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+internal fun AiSheet(
+    config: AiConfig,
+    busy: Boolean,
+    result: String,
+    loadKey: (AiProvider) -> String,
+    onConfig: (AiConfig) -> Unit,
+    onSaveKey: (AiProvider, String) -> Unit,
+    onAsk: (String) -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val provider = AiProvider.fromId(config.providerId)
+    var model by remember(provider, config.model) { mutableStateOf(config.model) }
+    var baseUrl by remember(provider, config.baseUrl) { mutableStateOf(config.baseUrl) }
+    var apiKey by remember(provider) { mutableStateOf(loadKey(provider)) }
+    var prompt by remember { mutableStateOf("") }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("مساعد البرمجة بالذكاء الاصطناعي", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "اختر مزودًا، أدخل مفتاحه يدويًا، ثم اطلب تحسين الملف أو إصلاح أخطائه.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AiProvider.entries.forEach { item ->
+                    FilterChip(
+                        selected = provider == item,
+                        onClick = {
+                            val next = AiConfig(
+                                providerId = item.name,
+                                model = item.defaultModel,
+                                baseUrl = if (item == AiProvider.CUSTOM) "" else item.defaultBaseUrl,
+                            )
+                            onConfig(next)
+                        },
+                        label = { Text(item.title) },
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = model,
+                onValueChange = {
+                    model = it
+                    onConfig(config.copy(model = it))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("اسم النموذج") },
+            )
+            if (provider == AiProvider.CUSTOM) {
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = {
+                        baseUrl = it
+                        onConfig(config.copy(baseUrl = it))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("عنوان API متوافق مع OpenAI") },
+                )
+            }
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                label = { Text("API Key") },
+                trailingIcon = {
+                    TextButton(onClick = { onSaveKey(provider, apiKey) }) { Text("حفظ") }
+                },
+            )
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 112.dp),
+                label = { Text("ماذا تريد أن يطور؟") },
+            )
+            Button(
+                onClick = { onAsk(prompt) },
+                enabled = !busy && prompt.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("إرسال للذكاء الاصطناعي")
+            }
+            if (result.isNotBlank()) {
+                Text("النتيجة", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                Surface(
+                    Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    Text(
+                        result,
+                        modifier = Modifier.padding(12.dp).heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onApply, modifier = Modifier.weight(1f)) { Text("تطبيق على الملف") }
+                    OutlinedButton(onClick = { prompt = "" }, modifier = Modifier.weight(1f)) { Text("مسح") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 internal fun ProjectSheet(
     session: IdeSession,
     onImportFile: () -> Unit,
@@ -502,7 +631,7 @@ internal fun ProjectSheet(
                 OutlinedButton(onClick = { onDismiss(); onImportFile() }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Outlined.FileOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("导入文件")
+                    Text("上传 ZIP / ملف")
                 }
                 OutlinedButton(onClick = { onDismiss(); onImportTree() }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))

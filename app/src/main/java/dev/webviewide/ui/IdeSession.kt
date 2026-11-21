@@ -22,6 +22,10 @@ import dev.webviewide.build.KeystoreException
 import dev.webviewide.build.KeystoreManager
 import dev.webviewide.build.Orientation
 import dev.webviewide.build.SignMode
+import dev.webviewide.ai.AiClient
+import dev.webviewide.ai.AiConfig
+import dev.webviewide.ai.AiConfigStore
+import dev.webviewide.ai.AiProvider
 import dev.webviewide.git.CredentialStore
 import dev.webviewide.git.GitEnv
 import dev.webviewide.git.GitRepo
@@ -35,6 +39,7 @@ import dev.webviewide.project.ProjectStore
 import dev.webviewide.project.ProjectZip
 import dev.webviewide.project.WebProject
 import dev.webviewide.project.isRasterImage
+import dev.webviewide.project.sourceKindFor
 import dev.webviewide.server.LocalPreviewServer
 import dev.webviewide.server.SiteFiles
 import java.io.File
@@ -83,6 +88,9 @@ class IdeSession(
     var gitCredHosts by mutableStateOf(listOf<String>())
     var gitRemote by mutableStateOf<String?>(null)
     var gitBranches by mutableStateOf(listOf<GitRepo.BranchInfo>())
+    var aiBusy by mutableStateOf(false)
+    var aiResult by mutableStateOf("")
+    var aiConfig by mutableStateOf(AiConfigStore.load(app))
     private val credentials = CredentialStore(
         File(app.filesDir, "git"),
         seal = { KeystoreManager.wrap(it) },
@@ -294,6 +302,101 @@ class IdeSession(
     fun gitPush() = gitRemoteOp("推送") { repo, provider -> repo.push(provider) }
 
     fun gitPull() = gitRemoteOp("拉取") { repo, provider -> repo.pull(provider) }
+
+    fun saveAiConfig(config: AiConfig) {
+        aiConfig = config
+        scope.launch(Dispatchers.IO) { AiConfigStore.save(app, config) }
+    }
+
+    fun saveAiKey(provider: AiProvider, apiKey: String) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { AiConfigStore.saveKey(app, provider, apiKey) }.fold(
+                onSuccess = { status = if (apiKey.isBlank()) "已删除 ${provider.title} API Key" else "${provider.title} API Key 已加密保存" },
+                onFailure = { status = it.message ?: "API Key 保存失败" },
+            )
+        }
+    }
+
+    fun aiKey(provider: AiProvider): String =
+        runCatching { AiConfigStore.loadKey(app, provider) }.getOrDefault("")
+
+    fun askAi(prompt: String) {
+        val open = project
+        if (prompt.isBlank()) {
+            status = "先描述需要修改的内容"
+            return
+        }
+        aiBusy = true
+        aiResult = ""
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    flushBlocking()
+                    val provider = AiProvider.fromId(aiConfig.providerId)
+                    val key = AiConfigStore.loadKey(app, provider)
+                    val file = current
+                    val rel = if (open != null && file != null) {
+                        runCatching { ProjectStore.relative(open, file) }.getOrDefault(file.name)
+                    } else ""
+                    val currentText = if (file != null) draft else ""
+                    val system = """
+                        You are an expert coding assistant inside WebViewIDE.
+                        Help improve HTML, CSS, JavaScript and small web projects.
+                        Prefer complete, working code. Respect existing conventions.
+                        If asked to edit the active file, return only the complete replacement file
+                        in a single fenced code block. Do not add explanations outside the block.
+                    """.trimIndent()
+                    val user = buildString {
+                        append(prompt.trim())
+                        if (rel.isNotBlank()) {
+                            append("\n\nActive file: ").append(rel)
+                            append("\nCurrent content:\n```").append(sourceKindFor(file?.name ?: "").name.lowercase())
+                            append('\n').append(currentText).append("\n```")
+                        }
+                    }
+                    AiClient.complete(
+                        provider = provider,
+                        baseUrl = aiConfig.baseUrl,
+                        model = aiConfig.model,
+                        apiKey = key,
+                        systemPrompt = system,
+                        userPrompt = user,
+                    )
+                }
+            }
+            aiBusy = false
+            outcome.fold(
+                onSuccess = { aiResult = it },
+                onFailure = { aiResult = ""; status = it.message ?: "AI 请求失败" },
+            )
+        }
+    }
+
+    fun applyAiResult() {
+        val file = current ?: run {
+            status = "先打开要修改的文件"
+            return
+        }
+        val result = aiResult.trim()
+        if (result.isBlank()) return
+        val replacement = extractCodeBlock(result)
+        edit(replacement)
+        docEpoch += 1
+        status = "AI 修改已应用到 ${file.name}"
+    }
+
+    private fun extractCodeBlock(text: String): String {
+        val trimmed = text.trim()
+        val start = trimmed.indexOf("```")
+        if (start >= 0) {
+            val openingEnd = trimmed.indexOf('\n', start)
+            val closing = trimmed.lastIndexOf("```")
+            if (openingEnd >= 0 && closing > openingEnd) {
+                return trimmed.substring(openingEnd + 1, closing).trimEnd() + "\n"
+            }
+        }
+        return trimmed
+    }
 
     private fun gitRemoteOp(label: String, op: (GitRepo, org.eclipse.jgit.transport.CredentialsProvider?) -> String) {
         val open = project ?: return
