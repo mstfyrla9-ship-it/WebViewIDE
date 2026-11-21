@@ -36,7 +36,7 @@ import dev.webviewide.BuildConfig
 /** Version, capabilities and the honest limits of the packaged output. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AboutSheet(onDismiss: () -> Unit) {
+internal fun AboutSheet(onSupport: () -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -97,6 +97,9 @@ internal fun AboutSheet(onDismiss: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onSupport, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text("联系支持：mstfyrla9@gmail.com")
+            }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text("知道了")
             }

@@ -21,6 +21,7 @@ class ApkPackager(private val context: Context) {
         outFile: File,
         identity: SigningIdentity,
         projectDir: File,
+        cancelRequested: () -> Boolean = { false },
         onLog: (String) -> Unit = {},
         onPhase: (String, String) -> Unit = { _, _ -> },
     ): ArtifactKind {
@@ -29,6 +30,7 @@ class ApkPackager(private val context: Context) {
             mkdirs()
         }
         try {
+            if (cancelRequested()) throw java.util.concurrent.CancellationException("Build cancelled")
             val template = File(work, "template.apk")
             extractTemplate(template)
             onLog("template ready (${humanSize(template.length())})")
@@ -46,6 +48,7 @@ class ApkPackager(private val context: Context) {
                 stripMeta(module)
                 module.refreshTable()
                 module.refreshManifest()
+                if (cancelRequested()) throw java.util.concurrent.CancellationException("Build cancelled")
 
                 val unsigned = File(work, "unsigned.apk")
                 onPhase("package", "write")

@@ -26,6 +26,30 @@ object ProjectDetect {
         if (!root.isDirectory) {
             return Detection(ProjectKinds.SOURCE, "", "index.html", false, false, "没有找到项目目录")
         }
+        val android = AndroidProjectAnalysisEngine.analyze(root)
+        if (android.type == AndroidProjectType.ANDROID_GRADLE) {
+            val detail = buildList {
+                add("Android Gradle")
+                android.packageName?.let { add(it) }
+                android.languages.forEach { add(it) }
+                android.agpVersion?.let { add("AGP $it") }
+            }.joinToString(" · ")
+            return Detection(
+                ProjectKinds.ANDROID_GRADLE,
+                "",
+                "index.html",
+                false,
+                false,
+                detail,
+                android,
+            )
+        }
+        if (android.type == AndroidProjectType.KOTLIN) {
+            return Detection(ProjectKinds.ANDROID_KOTLIN, "", "index.html", false, false, "Android/Kotlin source · source build support required", android)
+        }
+        if (android.type == AndroidProjectType.JAVA) {
+            return Detection(ProjectKinds.ANDROID_JAVA, "", "index.html", false, false, "Android/Java source · source build support required", android)
+        }
         val pkg = File(root, "package.json")
         val deps = if (pkg.isFile) dependencyNames(pkg.readText()) else emptySet()
         val framework = frameworkOf(deps)

@@ -18,6 +18,12 @@ data class BuildArtifact(
     val sizeBytes: Long,
     val createdAt: Long,
     val file: File,
+    val packageName: String = "",
+    val minSdk: Int? = null,
+    val targetSdk: Int? = null,
+    val architectures: Set<String> = emptySet(),
+    val signed: Boolean = false,
+    val aligned: Boolean = false,
 )
 
 /** Status of a single pipeline stage. */

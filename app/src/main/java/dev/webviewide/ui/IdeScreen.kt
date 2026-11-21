@@ -1,5 +1,6 @@
 package dev.webviewide.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -500,13 +501,21 @@ fun IdeScreen() {
                 project = open,
                 url = session.url,
                 lanUrl = session.lanUrl,
+                locale = session.currentLocale,
+                onLocale = { language ->
+                    session.setLocale(language)
+                    (context as? Activity)?.recreate()
+                },
                 onProject = { next, restart -> session.update(next, restart) },
                 onCopy = { session.copyUrl() },
                 onClear = { session.clearSiteData() },
                 onDismiss = { panel = null },
             )
         }
-        Panel.ABOUT -> AboutSheet(onDismiss = { panel = null })
+        Panel.ABOUT -> AboutSheet(
+            onSupport = { session.sendSupportReport("Support request", session.status.orEmpty()) },
+            onDismiss = { panel = null },
+        )
         Panel.BUILD -> BuildPanel(
             handle = buildHandle,
             running = session.buildRunning,
@@ -517,6 +526,7 @@ fun IdeScreen() {
             onRunning = { session.buildRunning = true },
             onStartBuild = { buildCtl.startBuild(2) },
             onStartTypecheck = { buildCtl.startTypecheck(3) },
+            onCancel = { session.cancelBuild() },
             onDismiss = { panel = null },
         )
         Panel.HISTORY -> HistorySheet(

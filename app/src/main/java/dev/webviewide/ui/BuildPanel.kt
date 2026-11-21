@@ -35,6 +35,7 @@ internal fun BuildPanel(
     onRunning: () -> Unit,
     onStartBuild: () -> Unit,
     onStartTypecheck: () -> Unit,
+    onCancel: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -69,6 +70,11 @@ internal fun BuildPanel(
             if (running || fraction > 0f) {
                 LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
                 Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = running,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("取消") }
             }
             LazyColumn(Modifier.heightIn(max = 260.dp)) {
                 items(log) { line ->

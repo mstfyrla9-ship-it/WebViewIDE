@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Badge
@@ -790,6 +791,8 @@ internal fun SettingsSheet(
     project: WebProject,
     url: String?,
     lanUrl: String?,
+    locale: String,
+    onLocale: (String) -> Unit,
     onProject: (WebProject, Boolean) -> Unit,
     onCopy: () -> Unit,
     onClear: () -> Unit,
@@ -807,6 +810,17 @@ internal fun SettingsSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SectionCard("语言 / اللغة / Язык", Icons.Outlined.Translate) {
+                ChipGroup(
+                    title = "界面语言",
+                    options = listOf(
+                        "zh" to "中文",
+                        "ar" to "العربية",
+                        "ru" to "Русский",
+                    ),
+                    selected = locale,
+                ) { onLocale(it) }
+            }
             Text("WebView 和服务", style = MaterialTheme.typography.headlineSmall)
             SectionCard("预览服务", Icons.Outlined.Link) {
                 Text(url ?: "预览还没起来", style = MaterialTheme.typography.bodyMedium)
